@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI Playlist Builder",
-  description: "Create YouTube playlist recommendations with OpenAI",
+  description: "Create Spotify playlist recommendations with OpenAI",
 };
 
 export default function RootLayout({

@@ -15,11 +15,11 @@ type ApiResponse = {
     requestedSongCount: number;
     excludedUrlCount: number;
     candidateSongCount: number;
-    youtubeSearchRequestsAttempted: number;
-    youtubeMatchesFound: number;
+    spotifySearchRequestsAttempted: number;
+    spotifyMatchesFound: number;
     openAiCallCount: number;
     finalPickCount: number;
-    youtubeQueriesAttempted: string[];
+    spotifyQueriesAttempted: string[];
   };
   error?: string;
 };
@@ -32,41 +32,14 @@ type DebugRun = {
   debug: NonNullable<ApiResponse["debug"]>;
 };
 
-function extractYouTubeVideoId(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    const fromQuery = parsed.searchParams.get("v");
-    if (fromQuery) return fromQuery;
-
-    if (parsed.hostname.includes("youtu.be")) {
-      const shortId = parsed.pathname.replace("/", "").trim();
-      return shortId || null;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function buildTemporaryPlaylistUrl(urls: string[]): string | null {
-  const ids = urls
-    .map(extractYouTubeVideoId)
-    .filter((id): id is string => Boolean(id));
-
-  if (!ids.length) return null;
-
-  return `https://www.youtube.com/watch_videos?video_ids=${ids.join(",")}`;
-}
-
-function dedupePicksByYoutubeUrl(
+function dedupePicksBySongUrl(
   existing: PlaylistRecommendation["picks"],
   incoming: PlaylistRecommendation["picks"],
 ) {
-  const seen = new Set(existing.map((pick) => pick.youtubeUrl));
+  const seen = new Set(existing.map((pick) => pick.songUrl));
   return incoming.filter((pick) => {
-    if (seen.has(pick.youtubeUrl)) return false;
-    seen.add(pick.youtubeUrl);
+    if (seen.has(pick.songUrl)) return false;
+    seen.add(pick.songUrl);
     return true;
   });
 }
@@ -80,19 +53,15 @@ export default function Home() {
   const [playlistHistory, setPlaylistHistory] = useState<string[]>([]);
   const [debugRuns, setDebugRuns] = useState<DebugRun[]>([]);
   const [songCount, setSongCount] = useState<SongCount>(10);
-  const temporaryPlaylistUrl = useMemo(() => {
-    if (!result) return null;
-    return buildTemporaryPlaylistUrl(result.picks.map((pick) => pick.youtubeUrl));
-  }, [result]);
 
   const cumulativeDebug = useMemo(() => {
     return debugRuns.reduce(
       (acc, run) => {
         acc.openAiCalls += run.debug.openAiCallCount;
-        acc.youtubeSearches += run.debug.youtubeSearchRequestsAttempted;
+        acc.spotifySearches += run.debug.spotifySearchRequestsAttempted;
         return acc;
       },
-      { openAiCalls: 0, youtubeSearches: 0 },
+      { openAiCalls: 0, spotifySearches: 0 },
     );
   }, [debugRuns]);
 
@@ -100,7 +69,7 @@ export default function Home() {
     const res = await fetch("/api/playlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, songCount: count, excludeYoutubeUrls: excludedUrls }),
+      body: JSON.stringify({ prompt, songCount: count, excludeSongUrls: excludedUrls }),
     });
 
     const data = (await res.json()) as ApiResponse;
@@ -121,7 +90,7 @@ export default function Home() {
     try {
       const data = await requestPlaylist(songCount);
       setResult(data.recommendation);
-      setPlaylistHistory(data.recommendation.picks.map((pick) => pick.youtubeUrl));
+      setPlaylistHistory(data.recommendation.picks.map((pick) => pick.songUrl));
       const debug = data.debug;
       if (debug) {
         setDebugRuns([{ phase: "initial", at: new Date().toISOString(), debug }]);
@@ -142,7 +111,7 @@ export default function Home() {
 
     try {
       const data = await requestPlaylist(5, playlistHistory);
-      const uniqueNewPicks = dedupePicksByYoutubeUrl(result.picks, data.recommendation.picks);
+      const uniqueNewPicks = dedupePicksBySongUrl(result.picks, data.recommendation.picks);
 
       if (!uniqueNewPicks.length) {
         setError("No additional unique songs found. Try a new prompt for more variety.");
@@ -156,7 +125,8 @@ export default function Home() {
           picks: [...current.picks, ...uniqueNewPicks],
         };
       });
-      setPlaylistHistory((current) => [...current, ...uniqueNewPicks.map((pick) => pick.youtubeUrl)]);
+      setPlaylistHistory((current) => [...current, ...uniqueNewPicks.map((pick) => pick.songUrl)]);
+
       const debug = data.debug;
       if (debug) {
         setDebugRuns((current) => [
@@ -178,7 +148,7 @@ export default function Home() {
         <Card style={{ width: "100%", maxWidth: 640, borderRadius: 16 }}>
           <Flex vertical align="center" justify="center" gap={12} style={{ padding: "56px 24px" }}>
             <Spin size="large" />
-            <Text type="secondary">Building your playlist and matching tracks on YouTube...</Text>
+            <Text type="secondary">Building your playlist and matching tracks on Spotify...</Text>
           </Flex>
         </Card>
       </main>
@@ -195,7 +165,7 @@ export default function Home() {
                 AI Playlist Builder
               </Title>
               <Paragraph type="secondary" style={{ margin: 0 }}>
-                Describe your mood, activity, or music taste. You will get a curated playlist with links.
+                Describe your mood, activity, or music taste. You will get a curated Spotify-ready playlist.
               </Paragraph>
             </Space>
 
@@ -223,12 +193,7 @@ export default function Home() {
 
             <Flex justify="space-between" align="center" wrap>
               <Text type="secondary">Tip: mention genre, energy, era, and activity for better results.</Text>
-              <Button
-                type="primary"
-                icon={<ArrowRightOutlined />}
-                onClick={onSubmit}
-                disabled={!prompt.trim()}
-              >
+              <Button type="primary" icon={<ArrowRightOutlined />} onClick={onSubmit} disabled={!prompt.trim()}>
                 Create Playlist
               </Button>
             </Flex>
@@ -265,10 +230,10 @@ export default function Home() {
                   <Space direction="vertical" size={2} style={{ width: "100%" }}>
                     <Text strong>{pick.title}</Text>
                     <Text type="secondary">{pick.why}</Text>
-                    <Link href={pick.youtubeUrl} target="_blank" rel="noreferrer">
+                    <Link href={pick.songUrl} target="_blank" rel="noreferrer">
                       <Space size={6}>
                         <PlayCircleOutlined />
-                        Open on YouTube
+                        Open on Spotify
                       </Space>
                     </Link>
                   </Space>
@@ -280,14 +245,7 @@ export default function Home() {
           {error ? <Alert type="error" message={error} showIcon /> : null}
 
           <Flex justify="space-between" align="center" wrap gap={10}>
-            {temporaryPlaylistUrl ? (
-              <Button type="primary" icon={<PlayCircleOutlined />} href={temporaryPlaylistUrl} target="_blank">
-                Open All Songs
-              </Button>
-            ) : (
-              <Text type="secondary">Temporary playlist link unavailable for current picks.</Text>
-            )}
-
+            <Text type="secondary">Tracks are deduplicated using playlist history.</Text>
             <Space size={10} wrap>
               <Button onClick={onLoadMore} loading={loadingMore} disabled={loadingMore}>
                 Load 5 More
@@ -310,15 +268,15 @@ export default function Home() {
               <Space direction="vertical" size={10} style={{ width: "100%" }}>
                 <Text strong>Debug Summary</Text>
                 <Text type="secondary">
-                  Session totals: OpenAI calls = {cumulativeDebug.openAiCalls}, YouTube searches ={" "}
-                  {cumulativeDebug.youtubeSearches}
+                  Session totals: OpenAI calls = {cumulativeDebug.openAiCalls}, Spotify searches ={" "}
+                  {cumulativeDebug.spotifySearches}
                 </Text>
                 <Collapse
                   items={debugRuns.map((run, index) => ({
                     key: `${run.at}-${index}`,
                     label: `${run.phase === "initial" ? "Initial" : "Load more"} | request ${
                       run.debug.requestId
-                    } | OpenAI ${run.debug.openAiCallCount} | YouTube ${run.debug.youtubeSearchRequestsAttempted}`,
+                    } | OpenAI ${run.debug.openAiCallCount} | Spotify ${run.debug.spotifySearchRequestsAttempted}`,
                     children: (
                       <pre
                         style={{

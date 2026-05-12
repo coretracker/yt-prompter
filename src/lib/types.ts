@@ -4,13 +4,13 @@ export type SongCandidate = {
   reason?: string;
 };
 
-export type YouTubeMatch = {
+export type SpotifyMatch = {
   query: string;
-  videoId: string;
+  trackId: string;
   title: string;
-  channelTitle: string;
+  artist: string;
+  album?: string;
   url: string;
-  description?: string;
 };
 
 export type PlaylistRecommendation = {
@@ -19,6 +19,6 @@ export type PlaylistRecommendation = {
   picks: Array<{
     title: string;
     why: string;
-    youtubeUrl: string;
+    songUrl: string;
   }>;
 };
