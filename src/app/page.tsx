@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowRightOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Input, List, Space, Spin, Typography } from "antd";
+import { Alert, Button, Card, Flex, Input, List, Segmented, Space, Spin, Typography } from "antd";
 import { PlaylistRecommendation } from "@/lib/types";
 
 const { TextArea } = Input;
@@ -12,6 +12,8 @@ type ApiResponse = {
   recommendation: PlaylistRecommendation;
   error?: string;
 };
+
+type SongCount = 10 | 20 | 30;
 
 function extractYouTubeVideoId(url: string): string | null {
   try {
@@ -45,6 +47,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlaylistRecommendation | null>(null);
+  const [songCount, setSongCount] = useState<SongCount>(10);
   const temporaryPlaylistUrl = useMemo(() => {
     if (!result) return null;
     return buildTemporaryPlaylistUrl(result.picks.map((pick) => pick.youtubeUrl));
@@ -60,7 +63,7 @@ export default function Home() {
       const res = await fetch("/api/playlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, songCount }),
       });
 
       const data = (await res.json()) as ApiResponse;
@@ -113,6 +116,19 @@ export default function Home() {
               showCount
               maxLength={800}
             />
+
+            <Space direction="vertical" size={8}>
+              <Text type="secondary">Number of songs</Text>
+              <Segmented<SongCount>
+                options={[
+                  { label: "10 songs", value: 10 },
+                  { label: "20 songs", value: 20 },
+                  { label: "30 songs", value: 30 },
+                ]}
+                value={songCount}
+                onChange={(value) => setSongCount(value)}
+              />
+            </Space>
 
             <Flex justify="space-between" align="center" wrap>
               <Text type="secondary">Tip: mention genre, energy, era, and activity for better results.</Text>

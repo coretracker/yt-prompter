@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 
 const requestSchema = z.object({
   prompt: z.string().min(5),
+  songCount: z.union([z.literal(10), z.literal(20), z.literal(30)]),
 });
 
 const candidatesSchema = z.object({
@@ -23,7 +24,7 @@ const candidatesSchema = z.object({
       }),
     )
     .min(5)
-    .max(20),
+    .max(40),
 });
 
 const recommendationSchema = z.object({
@@ -128,6 +129,7 @@ export async function POST(req: NextRequest) {
 
     const { openAiApiKey, youTubeApiKey } = getEnv();
     addLog("REQUEST_PROMPT", parsed.data.prompt);
+    addLog("REQUEST_SONG_COUNT", parsed.data.songCount);
     const openai = new OpenAI({ apiKey: openAiApiKey });
 
     const firstPass = await openai.chat.completions.create({
@@ -136,7 +138,7 @@ export async function POST(req: NextRequest) {
         {
           role: "system",
           content:
-            "You create structured music candidates. Return JSON only with shape { vibe: string, songs: [{ title: string, artist?: string, reason?: string }] }. Include 10 songs.",
+            `You create structured music candidates. Return JSON only with shape { vibe: string, songs: [{ title: string, artist?: string, reason?: string }] }. Include exactly ${parsed.data.songCount} songs.`,
         },
         {
           role: "user",
@@ -168,7 +170,7 @@ export async function POST(req: NextRequest) {
         {
           role: "system",
           content:
-            "Given initial desired songs and YouTube matches, choose the best matching playlist and return JSON only with shape { title: string, description: string, picks: [{ title: string, why: string, youtubeUrl: string }] }. Pick 8-12 songs.",
+            `Given initial desired songs and YouTube matches, choose the best matching playlist and return JSON only with shape { title: string, description: string, picks: [{ title: string, why: string, youtubeUrl: string }] }. Return exactly ${parsed.data.songCount} picks.`,
         },
         {
           role: "user",
