@@ -9,7 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@heroui/react": "^2.8.5",
+    "@ant-design/icons": "^6.2.2",
+    "antd": "^6.3.7",
     "next": "15.3.2",
     "openai": "^4.104.0",
     "react": "19.1.0",

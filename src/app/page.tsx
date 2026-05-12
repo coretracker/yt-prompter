@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, CardBody, CardHeader, Link, Spinner, Textarea } from "@heroui/react";
+import { ArrowRightOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Flex, Input, List, Space, Spin, Typography } from "antd";
 import { PlaylistRecommendation } from "@/lib/types";
+
+const { TextArea } = Input;
+const { Title, Paragraph, Text, Link } = Typography;
 
 type ApiResponse = {
   recommendation: PlaylistRecommendation;
@@ -46,11 +50,11 @@ export default function Home() {
   if (loading) {
     return (
       <main style={{ display: "grid", placeItems: "center", padding: 24 }}>
-        <Card className="max-w-xl w-full">
-          <CardBody className="gap-3 items-center py-12">
-            <Spinner size="lg" />
-            <p>Building your playlist and matching songs on YouTube...</p>
-          </CardBody>
+        <Card style={{ width: "100%", maxWidth: 640, borderRadius: 16 }}>
+          <Flex vertical align="center" justify="center" gap={12} style={{ padding: "56px 24px" }}>
+            <Spin size="large" />
+            <Text type="secondary">Building your playlist and matching tracks on YouTube...</Text>
+          </Flex>
         </Card>
       </main>
     );
@@ -59,54 +63,89 @@ export default function Home() {
   if (!result) {
     return (
       <main style={{ display: "grid", placeItems: "center", padding: 24 }}>
-        <Card className="max-w-2xl w-full">
-          <CardHeader className="flex-col items-start gap-2">
-            <h1 style={{ margin: 0, fontSize: "2rem" }}>AI Playlist Builder</h1>
-            <p style={{ margin: 0, opacity: 0.8 }}>
-              Describe your mood, activity, or music taste. The app will generate and match songs.
-            </p>
-          </CardHeader>
-          <CardBody className="gap-4">
-            <Textarea
+        <Card style={{ width: "100%", maxWidth: 760, borderRadius: 16 }}>
+          <Space direction="vertical" size={20} style={{ width: "100%" }}>
+            <Space direction="vertical" size={6}>
+              <Title level={2} style={{ margin: 0 }}>
+                AI Playlist Builder
+              </Title>
+              <Paragraph type="secondary" style={{ margin: 0 }}>
+                Describe your mood, activity, or music taste. You will get a curated playlist with links.
+              </Paragraph>
+            </Space>
+
+            <TextArea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              minRows={6}
-              placeholder="Example: Make me a high-energy indie workout playlist with modern female vocals"
+              placeholder="Example: Build me an upbeat late-night coding playlist with synthwave and chill electronic tracks"
+              autoSize={{ minRows: 7, maxRows: 12 }}
+              showCount
+              maxLength={800}
             />
-            <Button color="primary" onPress={onSubmit} isDisabled={!prompt.trim()}>
-              Create Playlist
-            </Button>
-            {error ? <p style={{ color: "#ff9f9f", margin: 0 }}>{error}</p> : null}
-          </CardBody>
+
+            <Flex justify="space-between" align="center" wrap>
+              <Text type="secondary">Tip: mention genre, energy, era, and activity for better results.</Text>
+              <Button
+                type="primary"
+                icon={<ArrowRightOutlined />}
+                onClick={onSubmit}
+                disabled={!prompt.trim()}
+              >
+                Create Playlist
+              </Button>
+            </Flex>
+
+            {error ? <Alert type="error" message={error} showIcon /> : null}
+          </Space>
         </Card>
       </main>
     );
   }
 
   return (
-    <main style={{ padding: 24, maxWidth: 920, margin: "0 auto" }}>
-      <Card>
-        <CardHeader className="flex-col items-start gap-2">
-          <h2 style={{ margin: 0, fontSize: "1.8rem" }}>{result.title}</h2>
-          <p style={{ margin: 0, opacity: 0.9 }}>{result.description}</p>
-        </CardHeader>
-        <CardBody className="gap-4">
-          {result.picks.map((pick, index) => (
-            <Card key={`${pick.youtubeUrl}-${index}`}>
-              <CardBody className="gap-2">
-                <strong>{pick.title}</strong>
-                <p style={{ margin: 0, opacity: 0.85 }}>{pick.why}</p>
-                <Link href={pick.youtubeUrl} target="_blank" rel="noreferrer">
-                  Open on YouTube
-                </Link>
-              </CardBody>
-            </Card>
-          ))}
-          <Button variant="flat" onPress={() => setResult(null)}>
-            Create Another Playlist
-          </Button>
-        </CardBody>
-      </Card>
+    <main style={{ padding: 24 }}>
+      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Card style={{ borderRadius: 16 }}>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              <Title level={3} style={{ margin: 0 }}>
+                {result.title}
+              </Title>
+              <Paragraph type="secondary" style={{ margin: 0 }}>
+                {result.description}
+              </Paragraph>
+            </Space>
+          </Card>
+
+          <Card style={{ borderRadius: 16 }}>
+            <List
+              itemLayout="vertical"
+              dataSource={result.picks}
+              split
+              renderItem={(pick) => (
+                <List.Item>
+                  <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                    <Text strong>{pick.title}</Text>
+                    <Text type="secondary">{pick.why}</Text>
+                    <Link href={pick.youtubeUrl} target="_blank" rel="noreferrer">
+                      <Space size={6}>
+                        <PlayCircleOutlined />
+                        Open on YouTube
+                      </Space>
+                    </Link>
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </Card>
+
+          <Flex justify="flex-end">
+            <Button icon={<ReloadOutlined />} onClick={() => setResult(null)}>
+              Create Another Playlist
+            </Button>
+          </Flex>
+        </Space>
+      </div>
     </main>
   );
 }
