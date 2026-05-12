@@ -111,6 +111,8 @@ export async function POST(req: NextRequest) {
     logLines.push(`[${new Date().toISOString()}] ${title}\n${stringifyLogData(data)}`);
   };
 
+  let openAiCallCount = 0;
+
   addLog("REQUEST_START", {
     requestId,
     method: req.method,
@@ -136,6 +138,7 @@ export async function POST(req: NextRequest) {
     addLog("REQUEST_EXCLUDED_URL_COUNT", excludedYoutubeUrls.length);
     const openai = new OpenAI({ apiKey: openAiApiKey });
 
+    openAiCallCount += 1;
     const firstPass = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
       messages: [
@@ -168,6 +171,7 @@ export async function POST(req: NextRequest) {
     ).filter((item): item is YouTubeMatch => Boolean(item));
     addLog("YOUTUBE_RESULTS", youtubeResults);
 
+    openAiCallCount += 1;
     const secondPass = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
       messages: [
@@ -226,8 +230,24 @@ export async function POST(req: NextRequest) {
     };
     addLog("OPENAI_SECOND_PASS_PARSED", finalRecommendation);
 
+    const debug = {
+      requestId,
+      requestedSongCount: parsed.data.songCount,
+      excludedUrlCount: excludedYoutubeUrls.length,
+      candidateSongCount: candidates.songs.length,
+      youtubeSearchRequestsAttempted: candidates.songs.length,
+      youtubeMatchesFound: youtubeResults.length,
+      openAiCallCount,
+      finalPickCount: finalRecommendation.picks.length,
+      youtubeQueriesAttempted: candidates.songs.map((song) =>
+        [song.title, song.artist, "official audio"].filter(Boolean).join(" "),
+      ),
+    };
+    addLog("REQUEST_DEBUG", debug);
+
     return NextResponse.json({
       recommendation: finalRecommendation,
+      debug,
       debugContext: {
         candidates,
         youtubeResults,

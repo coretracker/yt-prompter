@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ArrowRightOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Input, List, Segmented, Space, Spin, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Flex, Input, List, Segmented, Space, Spin, Typography } from "antd";
 import { PlaylistRecommendation } from "@/lib/types";
 
 const { TextArea } = Input;
@@ -10,11 +10,27 @@ const { Title, Paragraph, Text, Link } = Typography;
 
 type ApiResponse = {
   recommendation: PlaylistRecommendation;
+  debug?: {
+    requestId: string;
+    requestedSongCount: number;
+    excludedUrlCount: number;
+    candidateSongCount: number;
+    youtubeSearchRequestsAttempted: number;
+    youtubeMatchesFound: number;
+    openAiCallCount: number;
+    finalPickCount: number;
+    youtubeQueriesAttempted: string[];
+  };
   error?: string;
 };
 
 type SongCount = 10 | 20 | 30;
 type RequestSongCount = 5 | SongCount;
+type DebugRun = {
+  phase: "initial" | "load-more";
+  at: string;
+  debug: NonNullable<ApiResponse["debug"]>;
+};
 
 function extractYouTubeVideoId(url: string): string | null {
   try {
@@ -62,11 +78,23 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlaylistRecommendation | null>(null);
   const [playlistHistory, setPlaylistHistory] = useState<string[]>([]);
+  const [debugRuns, setDebugRuns] = useState<DebugRun[]>([]);
   const [songCount, setSongCount] = useState<SongCount>(10);
   const temporaryPlaylistUrl = useMemo(() => {
     if (!result) return null;
     return buildTemporaryPlaylistUrl(result.picks.map((pick) => pick.youtubeUrl));
   }, [result]);
+
+  const cumulativeDebug = useMemo(() => {
+    return debugRuns.reduce(
+      (acc, run) => {
+        acc.openAiCalls += run.debug.openAiCallCount;
+        acc.youtubeSearches += run.debug.youtubeSearchRequestsAttempted;
+        return acc;
+      },
+      { openAiCalls: 0, youtubeSearches: 0 },
+    );
+  }, [debugRuns]);
 
   async function requestPlaylist(count: RequestSongCount, excludedUrls: string[] = []) {
     const res = await fetch("/api/playlist", {
@@ -81,7 +109,7 @@ export default function Home() {
       throw new Error(data.error || "Something went wrong");
     }
 
-    return data.recommendation;
+    return data;
   }
 
   async function onSubmit() {
@@ -91,9 +119,13 @@ export default function Home() {
     setError(null);
 
     try {
-      const recommendation = await requestPlaylist(songCount);
-      setResult(recommendation);
-      setPlaylistHistory(recommendation.picks.map((pick) => pick.youtubeUrl));
+      const data = await requestPlaylist(songCount);
+      setResult(data.recommendation);
+      setPlaylistHistory(data.recommendation.picks.map((pick) => pick.youtubeUrl));
+      const debug = data.debug;
+      if (debug) {
+        setDebugRuns([{ phase: "initial", at: new Date().toISOString(), debug }]);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to contact server";
       setError(message);
@@ -109,8 +141,8 @@ export default function Home() {
     setError(null);
 
     try {
-      const recommendation = await requestPlaylist(5, playlistHistory);
-      const uniqueNewPicks = dedupePicksByYoutubeUrl(result.picks, recommendation.picks);
+      const data = await requestPlaylist(5, playlistHistory);
+      const uniqueNewPicks = dedupePicksByYoutubeUrl(result.picks, data.recommendation.picks);
 
       if (!uniqueNewPicks.length) {
         setError("No additional unique songs found. Try a new prompt for more variety.");
@@ -125,6 +157,13 @@ export default function Home() {
         };
       });
       setPlaylistHistory((current) => [...current, ...uniqueNewPicks.map((pick) => pick.youtubeUrl)]);
+      const debug = data.debug;
+      if (debug) {
+        setDebugRuns((current) => [
+          ...current,
+          { phase: "load-more", at: new Date().toISOString(), debug },
+        ]);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load more songs";
       setError(message);
@@ -258,12 +297,46 @@ export default function Home() {
                 onClick={() => {
                   setResult(null);
                   setPlaylistHistory([]);
+                  setDebugRuns([]);
                 }}
               >
                 Create Another Playlist
               </Button>
             </Space>
           </Flex>
+
+          {debugRuns.length ? (
+            <Card style={{ borderRadius: 16 }}>
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                <Text strong>Debug Summary</Text>
+                <Text type="secondary">
+                  Session totals: OpenAI calls = {cumulativeDebug.openAiCalls}, YouTube searches ={" "}
+                  {cumulativeDebug.youtubeSearches}
+                </Text>
+                <Collapse
+                  items={debugRuns.map((run, index) => ({
+                    key: `${run.at}-${index}`,
+                    label: `${run.phase === "initial" ? "Initial" : "Load more"} | request ${
+                      run.debug.requestId
+                    } | OpenAI ${run.debug.openAiCallCount} | YouTube ${run.debug.youtubeSearchRequestsAttempted}`,
+                    children: (
+                      <pre
+                        style={{
+                          margin: 0,
+                          overflowX: "auto",
+                          background: "#f7f7f8",
+                          padding: 12,
+                          borderRadius: 8,
+                        }}
+                      >
+                        {JSON.stringify(run.debug, null, 2)}
+                      </pre>
+                    ),
+                  }))}
+                />
+              </Space>
+            </Card>
+          ) : null}
         </Space>
       </div>
     </main>
