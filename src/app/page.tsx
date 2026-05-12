@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowRightOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Input, List, Space, Spin, Typography } from "antd";
 import { PlaylistRecommendation } from "@/lib/types";
@@ -13,11 +13,42 @@ type ApiResponse = {
   error?: string;
 };
 
+function extractYouTubeVideoId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const fromQuery = parsed.searchParams.get("v");
+    if (fromQuery) return fromQuery;
+
+    if (parsed.hostname.includes("youtu.be")) {
+      const shortId = parsed.pathname.replace("/", "").trim();
+      return shortId || null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function buildTemporaryPlaylistUrl(urls: string[]): string | null {
+  const ids = urls
+    .map(extractYouTubeVideoId)
+    .filter((id): id is string => Boolean(id));
+
+  if (!ids.length) return null;
+
+  return `https://www.youtube.com/watch_videos?video_ids=${ids.join(",")}`;
+}
+
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlaylistRecommendation | null>(null);
+  const temporaryPlaylistUrl = useMemo(() => {
+    if (!result) return null;
+    return buildTemporaryPlaylistUrl(result.picks.map((pick) => pick.youtubeUrl));
+  }, [result]);
 
   async function onSubmit() {
     if (!prompt.trim()) return;
@@ -139,7 +170,15 @@ export default function Home() {
             />
           </Card>
 
-          <Flex justify="flex-end">
+          <Flex justify="space-between" align="center" wrap gap={10}>
+            {temporaryPlaylistUrl ? (
+              <Button type="primary" icon={<PlayCircleOutlined />} href={temporaryPlaylistUrl} target="_blank">
+                Open All Songs
+              </Button>
+            ) : (
+              <Text type="secondary">Temporary playlist link unavailable for current picks.</Text>
+            )}
+
             <Button icon={<ReloadOutlined />} onClick={() => setResult(null)}>
               Create Another Playlist
             </Button>
