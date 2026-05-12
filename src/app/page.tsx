@@ -32,6 +32,18 @@ type DebugRun = {
   debug: NonNullable<ApiResponse["debug"]>;
 };
 
+function extractSpotifyTrackId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const trackIndex = parts.indexOf("track");
+    if (trackIndex < 0 || !parts[trackIndex + 1]) return null;
+    return parts[trackIndex + 1];
+  } catch {
+    return null;
+  }
+}
+
 function dedupePicksBySongUrl(
   existing: PlaylistRecommendation["picks"],
   incoming: PlaylistRecommendation["picks"],
@@ -56,6 +68,7 @@ export default function Home() {
   const [songCount, setSongCount] = useState<SongCount>(10);
   const [spotifyConnected, setSpotifyConnected] = useState<boolean>(false);
   const [createdPlaylistUrl, setCreatedPlaylistUrl] = useState<string | null>(null);
+  const [createdPlaylistUri, setCreatedPlaylistUri] = useState<string | null>(null);
 
   const cumulativeDebug = useMemo(() => {
     return debugRuns.reduce(
@@ -110,6 +123,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setCreatedPlaylistUrl(null);
+    setCreatedPlaylistUri(null);
 
     try {
       const data = await requestPlaylist(songCount);
@@ -183,7 +197,7 @@ export default function Home() {
         }),
       });
 
-      const data = (await res.json()) as { playlistUrl?: string; error?: string };
+      const data = (await res.json()) as { playlistUrl?: string; playlistUri?: string; error?: string };
       if (!res.ok || data.error || !data.playlistUrl) {
         if (res.status === 401) {
           setSpotifyConnected(false);
@@ -195,6 +209,7 @@ export default function Home() {
       }
 
       setCreatedPlaylistUrl(data.playlistUrl);
+      setCreatedPlaylistUri(data.playlistUri || null);
     } catch {
       setError("Failed to create Spotify playlist");
     } finally {
@@ -290,20 +305,31 @@ export default function Home() {
               itemLayout="vertical"
               dataSource={result.picks}
               split
-              renderItem={(pick) => (
-                <List.Item>
-                  <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                    <Text strong>{pick.title}</Text>
-                    <Text type="secondary">{pick.why}</Text>
-                    <Link href={pick.songUrl} target="_blank" rel="noreferrer">
-                      <Space size={6}>
-                        <PlayCircleOutlined />
-                        Open on Spotify
-                      </Space>
-                    </Link>
-                  </Space>
-                </List.Item>
-              )}
+              renderItem={(pick) => {
+                const trackId = extractSpotifyTrackId(pick.songUrl);
+                return (
+                  <List.Item>
+                    <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                      <Text strong>{pick.title}</Text>
+                      <Text type="secondary">{pick.why}</Text>
+                      <Link href={pick.songUrl} target="_blank" rel="noreferrer">
+                        <Space size={6}>
+                          <PlayCircleOutlined />
+                          Open on Spotify Web
+                        </Space>
+                      </Link>
+                      {trackId ? (
+                        <Link href={`spotify:track:${trackId}`} rel="noreferrer">
+                          <Space size={6}>
+                            <PlayCircleOutlined />
+                            Open in Spotify App
+                          </Space>
+                        </Link>
+                      ) : null}
+                    </Space>
+                  </List.Item>
+                );
+              }}
             />
           </Card>
 
@@ -333,6 +359,7 @@ export default function Home() {
                   setPlaylistHistory([]);
                   setDebugRuns([]);
                   setCreatedPlaylistUrl(null);
+                  setCreatedPlaylistUri(null);
                 }}
               >
                 Create Another Playlist
@@ -348,8 +375,16 @@ export default function Home() {
                 <span>
                   Playlist created.{" "}
                   <a href={createdPlaylistUrl} target="_blank" rel="noreferrer">
-                    Open in Spotify
+                    Open on Spotify Web
                   </a>
+                  {createdPlaylistUri ? (
+                    <>
+                      {" | "}
+                      <a href={createdPlaylistUri} rel="noreferrer">
+                        Open in Spotify App
+                      </a>
+                    </>
+                  ) : null}
                 </span>
               }
             />

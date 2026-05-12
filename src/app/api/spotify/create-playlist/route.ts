@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json({
       playlistId: createdPlaylist.id,
       playlistUrl: createdPlaylist.external_urls?.spotify || `https://open.spotify.com/playlist/${createdPlaylist.id}`,
+      playlistUri: `spotify:playlist:${createdPlaylist.id}`,
       tracksAdded: uris.length,
     });
 
