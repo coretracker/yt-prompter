@@ -7,6 +7,8 @@ export async function GET(req: NextRequest) {
     const code = req.nextUrl.searchParams.get("code");
     const state = req.nextUrl.searchParams.get("state");
     const storedState = req.cookies.get("spotify_oauth_state")?.value;
+    const { clientId, clientSecret, redirectUri } = getSpotifyEnv();
+    const appOrigin = new URL(redirectUri).origin;
 
     if (!code || !state || !storedState || state !== storedState) {
       await writeApiLogFile({
@@ -21,10 +23,9 @@ export async function GET(req: NextRequest) {
           query: Object.fromEntries(req.nextUrl.searchParams.entries()),
         },
       });
-      return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
+      return NextResponse.redirect(new URL("/?spotify_auth=failed", appOrigin));
     }
 
-    const { clientId, clientSecret, redirectUri } = getSpotifyEnv();
     const tokenPayload = await exchangeAuthorizationCode({
       code,
       clientId,
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
       redirectUri,
     });
 
-    const response = NextResponse.redirect(new URL("/?spotify_auth=connected", req.url));
+    const response = NextResponse.redirect(new URL("/?spotify_auth=connected", appOrigin));
     const expiresAt = Date.now() + tokenPayload.expires_in * 1000;
 
     response.cookies.set("spotify_access_token", tokenPayload.access_token, {
@@ -80,6 +81,11 @@ export async function GET(req: NextRequest) {
         query: Object.fromEntries(req.nextUrl.searchParams.entries()),
       },
     });
-    return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
+    try {
+      const { redirectUri } = getSpotifyEnv();
+      return NextResponse.redirect(new URL("/?spotify_auth=failed", new URL(redirectUri).origin));
+    } catch {
+      return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
+    }
   }
 }
