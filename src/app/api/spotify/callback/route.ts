@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeAuthorizationCode, getSpotifyEnv } from "@/lib/spotify-oauth";
+import { writeApiLogFile } from "@/lib/request-log";
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,6 +9,18 @@ export async function GET(req: NextRequest) {
     const storedState = req.cookies.get("spotify_oauth_state")?.value;
 
     if (!code || !state || !storedState || state !== storedState) {
+      await writeApiLogFile({
+        route: "/api/spotify/callback",
+        level: "warn",
+        event: "STATE_VALIDATION_FAILED",
+        context: {
+          hasCode: Boolean(code),
+          hasState: Boolean(state),
+          hasStoredState: Boolean(storedState),
+          stateMatches: Boolean(state && storedState && state === storedState),
+          query: Object.fromEntries(req.nextUrl.searchParams.entries()),
+        },
+      });
       return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
     }
 
@@ -57,7 +70,16 @@ export async function GET(req: NextRequest) {
     });
 
     return response;
-  } catch {
+  } catch (error) {
+    await writeApiLogFile({
+      route: "/api/spotify/callback",
+      level: "error",
+      event: "CALLBACK_ERROR",
+      error,
+      context: {
+        query: Object.fromEntries(req.nextUrl.searchParams.entries()),
+      },
+    });
     return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
   }
 }
