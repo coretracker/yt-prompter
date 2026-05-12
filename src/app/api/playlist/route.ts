@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { z } from "zod";
 import { PlaylistRecommendation, SongCandidate, YouTubeMatch } from "@/lib/types";
+
+export const runtime = "nodejs";
 
 const requestSchema = z.object({
   prompt: z.string().min(5),
@@ -83,16 +88,46 @@ async function fetchYouTubeMatch(song: SongCandidate, apiKey: string): Promise<Y
   };
 }
 
+function stringifyLogData(data: unknown): string {
+  if (typeof data === "string") return data;
+  return JSON.stringify(data, null, 2);
+}
+
+async function writeRequestLog(fileName: string, lines: string[]) {
+  const logDir = path.join(process.cwd(), "logs");
+  await mkdir(logDir, { recursive: true });
+  await writeFile(path.join(logDir, fileName), `${lines.join("\n\n")}\n`, "utf8");
+}
+
 export async function POST(req: NextRequest) {
+  const startedAt = new Date();
+  const requestId = randomUUID();
+  const logFileName = `${startedAt.toISOString().replace(/[:.]/g, "-")}_${requestId}.txt`;
+  const logLines: string[] = [];
+
+  const addLog = (title: string, data: unknown) => {
+    logLines.push(`[${new Date().toISOString()}] ${title}\n${stringifyLogData(data)}`);
+  };
+
+  addLog("REQUEST_START", {
+    requestId,
+    method: req.method,
+    path: req.nextUrl.pathname,
+  });
+
   try {
     const body = await req.json();
+    addLog("REQUEST_BODY", body);
+
     const parsed = requestSchema.safeParse(body);
 
     if (!parsed.success) {
+      addLog("REQUEST_VALIDATION_ERROR", parsed.error.format());
       return NextResponse.json({ error: "Invalid prompt" }, { status: 400 });
     }
 
     const { openAiApiKey, youTubeApiKey } = getEnv();
+    addLog("REQUEST_PROMPT", parsed.data.prompt);
     const openai = new OpenAI({ apiKey: openAiApiKey });
 
     const firstPass = await openai.chat.completions.create({
@@ -113,16 +148,19 @@ export async function POST(req: NextRequest) {
     });
 
     const firstRaw = firstPass.choices[0]?.message?.content;
+    addLog("OPENAI_FIRST_PASS_RAW", firstRaw || "EMPTY");
     if (!firstRaw) {
       return NextResponse.json({ error: "OpenAI first pass returned empty content" }, { status: 500 });
     }
 
     const firstJson = JSON.parse(firstRaw);
     const candidates = candidatesSchema.parse(firstJson);
+    addLog("OPENAI_FIRST_PASS_PARSED", candidates);
 
     const youtubeResults = (
       await Promise.all(candidates.songs.map((song) => fetchYouTubeMatch(song, youTubeApiKey)))
     ).filter((item): item is YouTubeMatch => Boolean(item));
+    addLog("YOUTUBE_RESULTS", youtubeResults);
 
     const secondPass = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
@@ -146,11 +184,13 @@ export async function POST(req: NextRequest) {
     });
 
     const secondRaw = secondPass.choices[0]?.message?.content;
+    addLog("OPENAI_SECOND_PASS_RAW", secondRaw || "EMPTY");
     if (!secondRaw) {
       return NextResponse.json({ error: "OpenAI second pass returned empty content" }, { status: 500 });
     }
 
     const recommendation = recommendationSchema.parse(JSON.parse(secondRaw)) as PlaylistRecommendation;
+    addLog("OPENAI_SECOND_PASS_PARSED", recommendation);
 
     return NextResponse.json({
       recommendation,
@@ -161,6 +201,22 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    addLog("REQUEST_ERROR", {
+      message,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    addLog("REQUEST_END", {
+      requestId,
+      durationMs: Date.now() - startedAt.getTime(),
+      logFileName,
+    });
+
+    try {
+      await writeRequestLog(logFileName, logLines);
+    } catch (logError) {
+      console.error("Failed to write request log", logError);
+    }
   }
 }
