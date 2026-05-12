@@ -14,6 +14,7 @@ type ApiResponse = {
 };
 
 type SongCount = 10 | 20 | 30;
+type RequestSongCount = 5 | SongCount;
 
 function extractYouTubeVideoId(url: string): string | null {
   try {
@@ -42,16 +43,46 @@ function buildTemporaryPlaylistUrl(urls: string[]): string | null {
   return `https://www.youtube.com/watch_videos?video_ids=${ids.join(",")}`;
 }
 
+function dedupePicksByYoutubeUrl(
+  existing: PlaylistRecommendation["picks"],
+  incoming: PlaylistRecommendation["picks"],
+) {
+  const seen = new Set(existing.map((pick) => pick.youtubeUrl));
+  return incoming.filter((pick) => {
+    if (seen.has(pick.youtubeUrl)) return false;
+    seen.add(pick.youtubeUrl);
+    return true;
+  });
+}
+
 export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlaylistRecommendation | null>(null);
+  const [playlistHistory, setPlaylistHistory] = useState<string[]>([]);
   const [songCount, setSongCount] = useState<SongCount>(10);
   const temporaryPlaylistUrl = useMemo(() => {
     if (!result) return null;
     return buildTemporaryPlaylistUrl(result.picks.map((pick) => pick.youtubeUrl));
   }, [result]);
+
+  async function requestPlaylist(count: RequestSongCount, excludedUrls: string[] = []) {
+    const res = await fetch("/api/playlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, songCount: count, excludeYoutubeUrls: excludedUrls }),
+    });
+
+    const data = (await res.json()) as ApiResponse;
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || "Something went wrong");
+    }
+
+    return data.recommendation;
+  }
 
   async function onSubmit() {
     if (!prompt.trim()) return;
@@ -60,24 +91,45 @@ export default function Home() {
     setError(null);
 
     try {
-      const res = await fetch("/api/playlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, songCount }),
-      });
+      const recommendation = await requestPlaylist(songCount);
+      setResult(recommendation);
+      setPlaylistHistory(recommendation.picks.map((pick) => pick.youtubeUrl));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to contact server";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      const data = (await res.json()) as ApiResponse;
+  async function onLoadMore() {
+    if (!prompt.trim() || !result) return;
 
-      if (!res.ok || data.error) {
-        setError(data.error || "Something went wrong");
+    setLoadingMore(true);
+    setError(null);
+
+    try {
+      const recommendation = await requestPlaylist(5, playlistHistory);
+      const uniqueNewPicks = dedupePicksByYoutubeUrl(result.picks, recommendation.picks);
+
+      if (!uniqueNewPicks.length) {
+        setError("No additional unique songs found. Try a new prompt for more variety.");
         return;
       }
 
-      setResult(data.recommendation);
-    } catch {
-      setError("Failed to contact server");
+      setResult((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          picks: [...current.picks, ...uniqueNewPicks],
+        };
+      });
+      setPlaylistHistory((current) => [...current, ...uniqueNewPicks.map((pick) => pick.youtubeUrl)]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load more songs";
+      setError(message);
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
   }
 
@@ -186,6 +238,8 @@ export default function Home() {
             />
           </Card>
 
+          {error ? <Alert type="error" message={error} showIcon /> : null}
+
           <Flex justify="space-between" align="center" wrap gap={10}>
             {temporaryPlaylistUrl ? (
               <Button type="primary" icon={<PlayCircleOutlined />} href={temporaryPlaylistUrl} target="_blank">
@@ -195,9 +249,20 @@ export default function Home() {
               <Text type="secondary">Temporary playlist link unavailable for current picks.</Text>
             )}
 
-            <Button icon={<ReloadOutlined />} onClick={() => setResult(null)}>
-              Create Another Playlist
-            </Button>
+            <Space size={10} wrap>
+              <Button onClick={onLoadMore} loading={loadingMore} disabled={loadingMore}>
+                Load 5 More
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  setResult(null);
+                  setPlaylistHistory([]);
+                }}
+              >
+                Create Another Playlist
+              </Button>
+            </Space>
           </Flex>
         </Space>
       </div>

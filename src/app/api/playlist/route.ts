@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 
 const requestSchema = z.object({
   prompt: z.string().min(5),
-  songCount: z.union([z.literal(10), z.literal(20), z.literal(30)]),
+  songCount: z.union([z.literal(5), z.literal(10), z.literal(20), z.literal(30)]),
+  excludeYoutubeUrls: z.array(z.string().url()).optional(),
 });
 
 const candidatesSchema = z.object({
@@ -128,8 +129,11 @@ export async function POST(req: NextRequest) {
     }
 
     const { openAiApiKey, youTubeApiKey } = getEnv();
+    const excludedYoutubeUrls = parsed.data.excludeYoutubeUrls || [];
+    const candidateCount = Math.min(40, parsed.data.songCount + Math.min(20, excludedYoutubeUrls.length));
     addLog("REQUEST_PROMPT", parsed.data.prompt);
     addLog("REQUEST_SONG_COUNT", parsed.data.songCount);
+    addLog("REQUEST_EXCLUDED_URL_COUNT", excludedYoutubeUrls.length);
     const openai = new OpenAI({ apiKey: openAiApiKey });
 
     const firstPass = await openai.chat.completions.create({
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
         {
           role: "system",
           content:
-            `You create structured music candidates. Return JSON only with shape { vibe: string, songs: [{ title: string, artist?: string, reason?: string }] }. Include exactly ${parsed.data.songCount} songs.`,
+            `You create structured music candidates. Return JSON only with shape { vibe: string, songs: [{ title: string, artist?: string, reason?: string }] }. Include exactly ${candidateCount} songs.`,
         },
         {
           role: "user",
@@ -176,6 +180,8 @@ export async function POST(req: NextRequest) {
           role: "user",
           content: JSON.stringify({
             originalPrompt: parsed.data.prompt,
+            constraint: "Do not return picks whose youtubeUrl appears in excludedYoutubeUrls.",
+            excludedYoutubeUrls,
             candidates,
             youtubeResults,
           }),
@@ -192,10 +198,36 @@ export async function POST(req: NextRequest) {
     }
 
     const recommendation = recommendationSchema.parse(JSON.parse(secondRaw)) as PlaylistRecommendation;
-    addLog("OPENAI_SECOND_PASS_PARSED", recommendation);
+    const excludedSet = new Set(excludedYoutubeUrls);
+    const uniquePicks = recommendation.picks.filter(
+      (pick, index, arr) =>
+        !excludedSet.has(pick.youtubeUrl) &&
+        arr.findIndex((entry) => entry.youtubeUrl === pick.youtubeUrl) === index,
+    );
+
+    if (uniquePicks.length < parsed.data.songCount) {
+      for (const match of youtubeResults) {
+        if (excludedSet.has(match.url)) continue;
+        if (uniquePicks.some((pick) => pick.youtubeUrl === match.url)) continue;
+
+        uniquePicks.push({
+          title: match.title,
+          why: "Added as an additional relevant match from YouTube results.",
+          youtubeUrl: match.url,
+        });
+
+        if (uniquePicks.length >= parsed.data.songCount) break;
+      }
+    }
+
+    const finalRecommendation: PlaylistRecommendation = {
+      ...recommendation,
+      picks: uniquePicks.slice(0, parsed.data.songCount),
+    };
+    addLog("OPENAI_SECOND_PASS_PARSED", finalRecommendation);
 
     return NextResponse.json({
-      recommendation,
+      recommendation: finalRecommendation,
       debugContext: {
         candidates,
         youtubeResults,
