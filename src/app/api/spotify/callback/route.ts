@@ -1,0 +1,63 @@
+import { NextRequest, NextResponse } from "next/server";
+import { exchangeAuthorizationCode, getSpotifyEnv } from "@/lib/spotify-oauth";
+
+export async function GET(req: NextRequest) {
+  try {
+    const code = req.nextUrl.searchParams.get("code");
+    const state = req.nextUrl.searchParams.get("state");
+    const storedState = req.cookies.get("spotify_oauth_state")?.value;
+
+    if (!code || !state || !storedState || state !== storedState) {
+      return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
+    }
+
+    const { clientId, clientSecret, redirectUri } = getSpotifyEnv();
+    const tokenPayload = await exchangeAuthorizationCode({
+      code,
+      clientId,
+      clientSecret,
+      redirectUri,
+    });
+
+    const response = NextResponse.redirect(new URL("/?spotify_auth=connected", req.url));
+    const expiresAt = Date.now() + tokenPayload.expires_in * 1000;
+
+    response.cookies.set("spotify_access_token", tokenPayload.access_token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: tokenPayload.expires_in,
+      path: "/",
+    });
+
+    if (tokenPayload.refresh_token) {
+      response.cookies.set("spotify_refresh_token", tokenPayload.refresh_token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 30,
+        path: "/",
+      });
+    }
+
+    response.cookies.set("spotify_token_expires_at", String(expiresAt), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: tokenPayload.expires_in,
+      path: "/",
+    });
+
+    response.cookies.set("spotify_oauth_state", "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 0,
+      path: "/",
+    });
+
+    return response;
+  } catch {
+    return NextResponse.redirect(new URL("/?spotify_auth=failed", req.url));
+  }
+}

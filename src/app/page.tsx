@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRightOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Collapse, Flex, Input, List, Segmented, Space, Spin, Typography } from "antd";
 import { PlaylistRecommendation } from "@/lib/types";
@@ -48,11 +48,14 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlaylistRecommendation | null>(null);
   const [playlistHistory, setPlaylistHistory] = useState<string[]>([]);
   const [debugRuns, setDebugRuns] = useState<DebugRun[]>([]);
   const [songCount, setSongCount] = useState<SongCount>(10);
+  const [spotifyConnected, setSpotifyConnected] = useState<boolean>(false);
+  const [createdPlaylistUrl, setCreatedPlaylistUrl] = useState<string | null>(null);
 
   const cumulativeDebug = useMemo(() => {
     return debugRuns.reduce(
@@ -64,6 +67,26 @@ export default function Home() {
       { openAiCalls: 0, spotifySearches: 0 },
     );
   }, [debugRuns]);
+
+  useEffect(() => {
+    const authStatus = new URLSearchParams(window.location.search).get("spotify_auth");
+    if (authStatus === "connected") {
+      setSpotifyConnected(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (authStatus === "failed") {
+      setError("Spotify connection failed. Please try again.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    fetch("/api/spotify/status")
+      .then((res) => res.json())
+      .then((data: { connected?: boolean }) => {
+        setSpotifyConnected(Boolean(data.connected));
+      })
+      .catch(() => {
+        setSpotifyConnected(false);
+      });
+  }, []);
 
   async function requestPlaylist(count: RequestSongCount, excludedUrls: string[] = []) {
     const res = await fetch("/api/playlist", {
@@ -86,6 +109,7 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
+    setCreatedPlaylistUrl(null);
 
     try {
       const data = await requestPlaylist(songCount);
@@ -142,6 +166,42 @@ export default function Home() {
     }
   }
 
+  async function onCreateSpotifyPlaylist() {
+    if (!result) return;
+    setCreatingPlaylist(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/spotify/create-playlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: result.title,
+          description: result.description,
+          trackUrls: result.picks.map((pick) => pick.songUrl),
+          isPublic: false,
+        }),
+      });
+
+      const data = (await res.json()) as { playlistUrl?: string; error?: string };
+      if (!res.ok || data.error || !data.playlistUrl) {
+        if (res.status === 401) {
+          setSpotifyConnected(false);
+          setError("Spotify not connected. Connect account first.");
+        } else {
+          setError(data.error || "Failed to create Spotify playlist");
+        }
+        return;
+      }
+
+      setCreatedPlaylistUrl(data.playlistUrl);
+    } catch {
+      setError("Failed to create Spotify playlist");
+    } finally {
+      setCreatingPlaylist(false);
+    }
+  }
+
   if (loading) {
     return (
       <main style={{ display: "grid", placeItems: "center", padding: 24 }}>
@@ -193,9 +253,14 @@ export default function Home() {
 
             <Flex justify="space-between" align="center" wrap>
               <Text type="secondary">Tip: mention genre, energy, era, and activity for better results.</Text>
-              <Button type="primary" icon={<ArrowRightOutlined />} onClick={onSubmit} disabled={!prompt.trim()}>
-                Create Playlist
-              </Button>
+              <Space size={10} wrap>
+                <Button href="/api/spotify/login" disabled={spotifyConnected}>
+                  {spotifyConnected ? "Spotify Connected" : "Connect Spotify"}
+                </Button>
+                <Button type="primary" icon={<ArrowRightOutlined />} onClick={onSubmit} disabled={!prompt.trim()}>
+                  Create Playlist
+                </Button>
+              </Space>
             </Flex>
 
             {error ? <Alert type="error" message={error} showIcon /> : null}
@@ -247,6 +312,17 @@ export default function Home() {
           <Flex justify="space-between" align="center" wrap gap={10}>
             <Text type="secondary">Tracks are deduplicated using playlist history.</Text>
             <Space size={10} wrap>
+              <Button href="/api/spotify/login" disabled={spotifyConnected}>
+                {spotifyConnected ? "Spotify Connected" : "Connect Spotify"}
+              </Button>
+              <Button
+                type="primary"
+                onClick={onCreateSpotifyPlaylist}
+                loading={creatingPlaylist}
+                disabled={!spotifyConnected || creatingPlaylist}
+              >
+                Create Spotify Playlist
+              </Button>
               <Button onClick={onLoadMore} loading={loadingMore} disabled={loadingMore}>
                 Load 5 More
               </Button>
@@ -256,12 +332,28 @@ export default function Home() {
                   setResult(null);
                   setPlaylistHistory([]);
                   setDebugRuns([]);
+                  setCreatedPlaylistUrl(null);
                 }}
               >
                 Create Another Playlist
               </Button>
             </Space>
           </Flex>
+
+          {createdPlaylistUrl ? (
+            <Alert
+              type="success"
+              showIcon
+              message={
+                <span>
+                  Playlist created.{" "}
+                  <a href={createdPlaylistUrl} target="_blank" rel="noreferrer">
+                    Open in Spotify
+                  </a>
+                </span>
+              }
+            />
+          ) : null}
 
           {debugRuns.length ? (
             <Card style={{ borderRadius: 16 }}>
